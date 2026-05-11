@@ -1,0 +1,68 @@
+---
+title: Field Mapping
+description: Odoo field names mapped to ML training CSV columns
+---
+
+# Field Mapping
+
+This page maps Odoo technical field names to the CSV columns expected by the ML training pipeline.
+
+## Revenue Model Features
+
+| Odoo Object | Odoo Field | CSV Column | Type | Notes |
+|---|---|---|---|---|
+| `sale.order.line` | `product_uom_qty` | `quantity_sold` | Float | Units per line item |
+| `sale.order.line` | `price_unit` | `price` | Float | Price before discount |
+| `sale.order.line` | `discount` | `discount_percent` | Float | 0–100 |
+| `sale.order` | `date_order` | `month` | Int | Extracted month (1–12) |
+| `sale.order` | `date_order` | `quarter` | Int | Extracted quarter (1–4) |
+| computed | — | `seasonal_index` | Float | `month / 6.5` (normalised) |
+| computed | — | `gross_margin_pct` | Float | `(price - cost) / price` |
+| `sale.order.line` | `price_subtotal` | `net_revenue` | Float | **Target variable** |
+
+## Churn Model Features
+
+| Odoo Object | Odoo Field | CSV Column | Type | Notes |
+|---|---|---|---|---|
+| `res.partner` | aggregated | `days_since_last_order` | Int | Days since last `sale.order` |
+| `res.partner` | aggregated | `total_orders` | Int | COUNT of confirmed orders |
+| `res.partner` | aggregated | `avg_days_between_orders` | Float | Mean inter-order gap |
+| `res.partner` | custom field | `churn_risk_score` | Float | 0–1 CRM risk score |
+| `res.partner` | aggregated | `total_spent` | Float | SUM of `amount_total` |
+| `res.partner` | aggregated | `avg_order_value` | Float | AVG of `amount_total` |
+| `res.partner` | computed | `churned` | Int | **Target** (0 = active, 1 = churned) |
+
+## Growth Model Features
+
+| Source | CSV Column | Type | Notes |
+|---|---|---|---|
+| Sales analysis | `period` | String | e.g. `"2026-Q1"` |
+| Sales analysis | `total_revenue` | Float | Period revenue total |
+| Sales analysis | `order_count` | Int | Orders in period |
+| Sales analysis | `new_customers` | Int | New partners in period |
+| Sales analysis | `avg_order_value` | Float | Period average |
+| Computed (3m lag) | `revenue_growth_3m` | Float | **Target variable** |
+
+## Computed Field Reference
+
+### `seasonal_index`
+```python
+seasonal_index = month / 6.5
+# Ranges approximately 0.15 (Jan) → 1.85 (Dec)
+# Captures cyclical monthly patterns
+```
+
+### `churned` Label
+```python
+# A customer is churned if they have not ordered in 90+ days
+from datetime import datetime, timedelta
+cutoff = datetime.now() - timedelta(days=90)
+df['churned'] = (df['last_order_date'] < cutoff).astype(int)
+```
+
+### `revenue_growth_3m` (target)
+```python
+# 3-period forward revenue (shifted for supervised learning)
+df['revenue_growth_3m'] = df['total_revenue'].shift(-3)
+df.dropna(subset=['revenue_growth_3m'], inplace=True)
+```

@@ -1,0 +1,115 @@
+---
+title: Dataset Management
+description: File upload, preprocessing, and ChromaDB ingestion
+---
+
+# Dataset Management
+
+The Datasets module handles file uploads, automatic preprocessing, PostgreSQL storage, and ChromaDB ingestion — all triggered by a single API call.
+
+## Upload Pipeline
+
+When a user uploads a file, the backend runs a 5-step pipeline:
+
+```
+Upload file
+    │
+    ▼
+1. Validate file type (.csv / .xlsx / .xls / .pdf / .txt / .json)
+    │
+    ▼
+2. DynamicPreprocessingPipeline
+   - Detects columns and data types automatically
+   - Handles missing values, outliers, encoding issues
+   - Computes a data quality score (0–100)
+    │
+    ▼
+3. Save cleaned DataFrame to PostgreSQL
+   Table name: cleaned_<filename>_<timestamp>
+    │
+    ▼
+4. Register metadata in uploads table
+   (filename, rows, quality score, category, user_id)
+    │
+    ▼
+5. Ingest text chunks into ChromaDB
+   (makes the dataset queryable via the Knowledge Base)
+```
+
+## Endpoints
+
+### Upload a File
+
+```
+POST /api/v1/datasets/upload
+Content-Type: multipart/form-data
+```
+
+| Form Field | Type | Default | Description |
+|---|---|---|---|
+| `file` | `File` | required | File to upload |
+| `user_id` | `int` | `1` | ID of the uploading user |
+| `category` | `string` | `"general"` | Logical category tag |
+
+**Supported types:** `.csv`, `.xlsx`, `.xls`, `.pdf`, `.txt`, `.json`
+
+**Response:**
+
+```json
+{
+  "id": 12,
+  "filename": "sales_q2_2026.csv",
+  "row_count": 4821,
+  "quality_score": 94.2,
+  "category": "sales",
+  "cleaned_table": "cleaned_sales_q2_2026_20260511",
+  "kb_ingested": true,
+  "created_at": "2026-05-11T10:00:00"
+}
+```
+
+### List All Datasets
+
+```
+GET /api/v1/datasets
+```
+
+Returns all uploaded datasets ordered by most recent.
+
+### Get Single Dataset
+
+```
+GET /api/v1/datasets/{id}
+```
+
+Returns full metadata for one dataset.
+
+### Delete Dataset
+
+```
+DELETE /api/v1/datasets/{id}
+```
+
+Removes the database record. The cleaned table and ChromaDB entries are also removed if they exist.
+
+## Dynamic Preprocessing Pipeline
+
+`DynamicPreprocessingPipeline` (`ml/dynamic_preprocessing_pipeline.py`) is a schema-agnostic cleaner that adapts to any uploaded file:
+
+- **Type inference** — automatically detects numeric, categorical, and date columns
+- **Missing value handling** — median fill for numeric, mode fill for categorical
+- **Outlier capping** — IQR-based capping for numeric columns
+- **Encoding** — converts text columns to usable representations
+- **Quality scoring** — outputs a 0–100 completeness/consistency score
+
+> **ℹ️ Note:** Because the pipeline is dynamic, it works on any CSV shape — not just the Odoo exports the ML models were trained on. You can upload any business dataset and query it via the Knowledge Base.
+
+## ChromaDB Integration
+
+After preprocessing, the text content of the file is:
+
+1. Split into chunks of ~200 words
+2. Embedded using `all-MiniLM-L6-v2` (SentenceTransformers)
+3. Stored in a persistent ChromaDB collection named `optimaai_knowledge`
+
+This makes every uploaded dataset searchable by the Knowledge Base's RAG query endpoint.

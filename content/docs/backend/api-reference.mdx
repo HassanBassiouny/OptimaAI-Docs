@@ -1,0 +1,281 @@
+---
+title: API Reference
+description: Complete REST API endpoint documentation
+---
+
+# API Reference
+
+All endpoints are prefixed with `/api/v1`. The API follows REST conventions and returns JSON.
+
+---
+
+## Predict Revenue
+
+```
+POST /api/v1/predict/revenue
+```
+
+Predicts net revenue for a single order using the trained XGBoost/GBM revenue regressor.
+
+**Request Body**
+
+| Field | Type | Description |
+|---|---|---|
+| `features` | `object` | Key/value map of model input features |
+
+**Feature Fields**
+
+| Field | Type | Example |
+|---|---|---|
+| `quantity_sold` | `int` | `3` |
+| `price` | `float` | `299.0` |
+| `discount_percent` | `float` | `10` |
+| `seasonal_index` | `float` | `1.0` |
+| `gross_margin_pct` | `float` | `0.45` |
+| `month` | `int` | `6` |
+| `quarter` | `int` | `2` |
+
+```json
+{
+  "features": {
+    "quantity_sold": 3,
+    "price": 299.0,
+    "discount_percent": 10,
+    "seasonal_index": 1.0,
+    "gross_margin_pct": 0.45,
+    "month": 6,
+    "quarter": 2
+  }
+}
+```
+  
+  
+```json
+{
+  "prediction": 807.30,
+  "unit": "USD",
+  "model": "XGBoost/GBM Revenue Regressor",
+  "timestamp": "2026-05-11T10:00:00"
+}
+```
+  
+
+---
+
+## Predict Churn
+
+```
+POST /api/v1/predict/churn
+```
+
+Returns churn probability and a risk classification for a customer.
+
+**Feature Fields**
+
+| Field | Type | Description |
+|---|---|---|
+| `days_since_last_order` | `int` | Days since the customer last ordered |
+| `total_orders` | `int` | Lifetime number of orders |
+| `avg_days_between_orders` | `float` | Average ordering cadence |
+| `churn_risk_score` | `float` | Pre-computed ERP risk signal (0–1) |
+| `total_spent` | `float` | Lifetime spend in USD |
+| `avg_order_value` | `float` | Average order value |
+
+```json
+{
+  "features": {
+    "days_since_last_order": 95,
+    "total_orders": 2,
+    "avg_days_between_orders": 60,
+    "churn_risk_score": 0.72,
+    "total_spent": 1200.0,
+    "avg_order_value": 600.0
+  }
+}
+```
+  
+  
+```json
+{
+  "churn_probability": 0.7841,
+  "risk_level": "high",
+  "model": "XGBoost/GBM Churn Classifier",
+  "timestamp": "2026-05-11T10:00:00"
+}
+```
+  
+
+**Risk Levels**
+
+| Probability | Risk Level |
+|---|---|
+| `< 0.4` | `low` |
+| `0.4 – 0.69` | `medium` |
+| `≥ 0.7` | `high` |
+
+---
+
+## Predict Growth
+
+```
+POST /api/v1/predict/growth
+```
+
+Returns a 3-month forward revenue forecast.
+
+```json
+{
+  "features": {
+    "...": "same shape as revenue features"
+  }
+}
+```
+  
+  
+```json
+{
+  "forecast_3m": 45200.00,
+  "unit": "USD",
+  "model": "XGBoost/GBM Growth Regressor",
+  "timestamp": "2026-05-11T10:00:00"
+}
+```
+  
+
+---
+
+## Get KPI Snapshot
+
+```
+GET /api/v1/kpis
+```
+
+Returns the latest aggregated model performance metrics. Checks Redis first (5-minute TTL); on cache miss, loads from artefacts, persists to PostgreSQL, and writes to cache.
+
+**Response fields**
+
+| Field | Description |
+|---|---|
+| `snapshot_id` | Database row ID |
+| `revenue_model` | MAPE, R², MAE, forecast bias, 12-period forecast |
+| `churn_model` | ROC-AUC, F1, churn rate |
+| `growth_model` | MAPE, R², 12-month forecast |
+| `prophet_model` | MAPE from Prophet time-series |
+| `source` | `"cache"` or `"database"` |
+
+---
+
+## Get AI Recommendation
+
+```
+POST /api/v1/recommend
+```
+
+Generates a role-tailored business recommendation from live KPIs via LLM (OpenRouter). Results are cached per role for 1 hour.
+
+```json
+{
+  "role": "Sales Manager"
+}
+```
+  
+  
+```json
+{
+  "id": 42,
+  "role": "Sales Manager",
+  "recommendation": "...",
+  "model": "openrouter/free",
+  "created_at": "2026-05-11T10:00:00",
+  "source": "live"
+}
+```
+  
+
+Supported roles: `Sales Manager`, `Finance Controller`, `Executive` (or any custom string — the prompt adapts).
+
+---
+
+## Generate Business Model Canvas
+
+```
+POST /api/v1/bmc
+```
+
+Generates a complete 9-block Business Model Canvas using live ML KPIs. Cached for 24 hours.
+
+```json
+{
+  "platform_name": "OptimaAi",
+  "data_source": "Odoo ERP",
+  "target_users": "SME Sales Managers, Finance Controllers, Executives"
+}
+```
+  
+  
+```json
+{
+  "id": 7,
+  "bmc_blocks": {
+    "Customer Segments": ["SME businesses with 10–500 employees", "..."],
+    "Value Propositions": ["Real-time churn detection with 1.00 ROC-AUC", "..."],
+    "...": "..."
+  },
+  "bmc_text": "## 1. Customer Segments\n- ...",
+  "model": "openrouter/free",
+  "created_at": "2026-05-11T10:00:00",
+  "source": "live"
+}
+```
+  
+
+---
+
+## Get Latest BMC
+
+```
+GET /api/v1/bmc/latest
+```
+
+Returns the most recently generated BMC from PostgreSQL.
+
+---
+
+## Upload Dataset
+
+```
+POST /api/v1/datasets/upload
+```
+
+Accepts a file upload, runs the preprocessing pipeline, stores cleaned data in PostgreSQL, and ingests into the ChromaDB knowledge base.
+
+**Supported file types:** `.csv`, `.xlsx`, `.xls`, `.pdf`, `.txt`, `.json`
+
+**Form Fields**
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `file` | `File` | required | The uploaded file |
+| `user_id` | `int` | `1` | Owner ID |
+| `category` | `string` | `"general"` | Dataset category tag |
+
+---
+
+## Knowledge Base Query
+
+```
+POST /api/v1/kb/query
+```
+
+Runs a RAG query against ingested documents. Retrieves top-3 relevant chunks from ChromaDB and generates a grounded LLM answer.
+
+**Request Body**
+
+```json
+{
+  "query": "What is the average order value for returning customers?",
+  "n_results": 3
+}
+```
+
+> **ℹ️ Note:** The knowledge base only contains documents that have been explicitly uploaded via the datasets endpoint or manually ingested.

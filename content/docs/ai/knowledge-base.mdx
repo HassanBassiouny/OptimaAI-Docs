@@ -1,0 +1,144 @@
+---
+title: Knowledge Base (RAG)
+description: ChromaDB RAG setup, ingestion, and querying
+---
+
+# Knowledge Base (RAG)
+
+The Knowledge Base allows users to ask natural language questions about their business data and uploaded documents. It uses Retrieval-Augmented Generation (RAG) backed by **ChromaDB** and **SentenceTransformers**.
+
+## How RAG Works in OptimaAi
+
+```
+User query
+    │
+    ▼
+Embed query with all-MiniLM-L6-v2
+    │
+    ▼
+ChromaDB cosine similarity search
+→ Returns top-3 most relevant chunks
+    │
+    ▼
+Build prompt: [system context] + [retrieved chunks] + [user query]
+    │
+    ▼
+LLM generates grounded answer
+    │
+    ▼
+Response + source chunks returned to frontend
+```
+
+## Configuration
+
+```env
+CHROMA_DIR=knowledge_base/chroma
+```
+
+The ChromaDB collection is named `optimaai_knowledge`. It persists to disk at the `CHROMA_DIR` path and survives server restarts.
+
+**Embedding model:** `all-MiniLM-L6-v2` (via SentenceTransformers)
+- 384-dimensional vectors
+- Runs locally — no API calls for embedding
+- Fast enough for real-time query embedding
+
+**Distance metric:** Cosine similarity (`hnsw:space: cosine`)
+
+## Ingestion
+
+Text is chunked and embedded during dataset upload. Ingestion is also available directly:
+
+```python
+from app.services.knowledge_base import ingest_text, ingest_file
+
+# Ingest raw text
+ingest_text(
+    text="Our Q1 revenue was $1.2M, up 15% YoY...",
+    source="q1-report-2026",
+    category="finance",
+    chunk_size=200,   # words per chunk
+)
+
+# Ingest a file (CSV, PDF, TXT, XLSX, JSON)
+ingest_file(
+    file_path="data/sales_report.csv",
+    source="sales-report-q2",
+    category="sales",
+)
+```
+
+**Chunking strategy:**
+- Text is split into ~200-word chunks (configurable)
+- Each chunk is trimmed to 800 characters max before embedding
+- Chunks get a unique MD5 ID based on content hash (prevents duplicates)
+- Metadata stored: `source`, `category`, `timestamp`, `chunk_index`
+
+## Querying
+
+```python
+from app.services.knowledge_base import query_knowledge_base
+
+result = query_knowledge_base(
+    query="What is the average order value for returning customers?",
+    n_results=3,
+)
+
+# result["answer"]  → LLM-generated answer
+# result["sources"] → list of retrieved chunks with metadata
+```
+
+**RAG prompt structure:**
+
+```
+You are a business analyst assistant for OptimaAi.
+Answer the question using ONLY the context provided.
+If the context doesn't contain enough information, say so.
+
+CONTEXT:
+[Chunk 1 text — 800 chars max]
+[Chunk 2 text — 800 chars max]
+[Chunk 3 text — 800 chars max]
+
+QUESTION: {user_query}
+
+Answer in 3–5 sentences. Cite the source document where relevant.
+```
+
+> **⚠️ Warning:** The LLM is instructed to only answer from retrieved context. If no relevant chunks are found, it will say so rather than hallucinate. This is intentional — grounding is more important than always having an answer.
+
+## Fixes Applied to Knowledge Base
+
+Several improvements were made to resolve incomplete or truncated RAG output:
+
+| Fix | Before | After | Reason |
+|---|---|---|---|
+| `max_tokens` | 400 | 600 | Prevent answer cut-off |
+| `chunk_size` | 500 words | 200 words | Tighter chunks = better retrieval |
+| `n_results` | 5 | 3 | Fewer chunks = less prompt bloat |
+| Chunk trim | none | 800 chars | Prevents oversized context |
+| Completeness check | none | `_ensure_complete()` | Trims to last full sentence if cut off |
+
+## Managing the Knowledge Base
+
+### List all documents
+
+```python
+from app.services.knowledge_base import list_documents
+docs = list_documents()
+# Returns list of {source, category, chunk_count, ingested_at}
+```
+
+### Delete a document
+
+```python
+from app.services.knowledge_base import delete_document
+delete_document(source="q1-report-2026")
+```
+
+### Get collection stats
+
+```python
+from app.services.knowledge_base import _get_collection
+col = _get_collection()
+print(f"Total chunks: {col.count()}")
+```

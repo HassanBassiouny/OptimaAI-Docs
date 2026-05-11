@@ -1,0 +1,122 @@
+---
+title: Data Exports
+description: How to export datasets from Odoo for ML training
+---
+
+# Data Exports
+
+This page explains how to export the required datasets from Odoo for ML training.
+
+## Revenue Dataset
+
+**File:** `data/amazon_revenue_forecasting.csv`
+
+**How to export from Odoo:**
+
+1. Go to **Sales → Orders → Orders**
+2. Set the filter to confirmed orders (`state = sale`)
+3. Click **Action → Export**
+4. Select the fields listed below
+5. Export as CSV
+
+**Required fields:**
+
+| Odoo Field | CSV Column | Description |
+|---|---|---|
+| `sale.order.line.product_uom_qty` | `quantity_sold` | Units sold per line |
+| `sale.order.line.price_unit` | `price` | Unit selling price |
+| `sale.order.line.discount` | `discount_percent` | Line discount % |
+| `sale.order.date_order` | `month`, `quarter` | Order date (parsed) |
+| `sale.order.line.margin` / `price_subtotal` | `gross_margin_pct` | Margin ratio |
+| (computed) | `seasonal_index` | Seasonal index from date |
+| `sale.order.line.price_subtotal` | `net_revenue` | **Target variable** |
+
+---
+
+## Churn Dataset
+
+**File:** `data/amazon_churn_prediction.csv`
+
+**How to export from Odoo:**
+
+1. Go to **Sales → Orders → Customers** or **CRM → Customers**
+2. Use a pivot/analysis view or custom report
+3. The dataset requires per-customer aggregation — Odoo's built-in export may need to be supplemented with a custom report or Python script using the XML-RPC API
+
+**Required fields:**
+
+| CSV Column | Description | Source |
+|---|---|---|
+| `days_since_last_order` | Days since most recent order | Computed from `date_order` |
+| `total_orders` | Lifetime order count | `COUNT(sale.order)` per partner |
+| `avg_days_between_orders` | Average order cadence | Computed |
+| `churn_risk_score` | Pre-computed risk signal | From CRM or custom field |
+| `total_spent` | Lifetime revenue | `SUM(amount_total)` |
+| `avg_order_value` | Average order size | `AVG(amount_total)` |
+| `churned` | **Target variable** (0/1) | Manual label or inferred from inactivity |
+
+**Churn label convention:** A customer is marked as churned (`churned = 1`) if they have had no orders in the last 90 days.
+
+---
+
+## Growth Dataset
+
+**File:** `data/amazon_growth_projection.csv`
+
+**How to export from Odoo:**
+
+1. Go to **Sales → Reporting → Sales Analysis**
+2. Group by month or quarter
+3. Export revenue totals per period
+
+**Required fields:**
+
+| CSV Column | Description |
+|---|---|
+| `period` | Month or quarter label |
+| `total_revenue` | Revenue for the period |
+| `order_count` | Number of orders |
+| `new_customers` | New partners acquired |
+| `avg_order_value` | Average order value for the period |
+| `revenue_growth_3m` | **Target variable** — 3-month forward revenue |
+
+---
+
+## Automating Exports (Python + XML-RPC)
+
+For automated, scheduled exports, use the Odoo XML-RPC API:
+
+```python
+import xmlrpc.client
+import pandas as pd
+from datetime import datetime, timedelta
+
+URL     = "https://your-odoo.com"
+DB      = "your_db"
+USER    = "admin@company.com"
+API_KEY = "your_key"
+
+common  = xmlrpc.client.ServerProxy(f"{URL}/xmlrpc/2/common")
+uid     = common.authenticate(DB, USER, API_KEY, {})
+models  = xmlrpc.client.ServerProxy(f"{URL}/xmlrpc/2/object")
+
+# Pull all confirmed order lines from the last 2 years
+cutoff  = (datetime.now() - timedelta(days=730)).strftime("%Y-%m-%d")
+lines   = models.execute_kw(
+    DB, uid, API_KEY,
+    'sale.order.line', 'search_read',
+    [[['order_id.state', '=', 'sale'],
+      ['order_id.date_order', '>=', cutoff]]],
+    {
+        'fields': [
+            'product_uom_qty', 'price_unit', 'discount',
+            'price_subtotal', 'order_id'
+        ],
+        'limit': 50000
+    }
+)
+
+df = pd.DataFrame(lines)
+df.to_csv("data/amazon_revenue_forecasting.csv", index=False)
+print(f"Exported {len(df)} order lines.")
+```

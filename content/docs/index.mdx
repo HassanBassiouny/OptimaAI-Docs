@@ -1,0 +1,40 @@
+---
+title: Introduction
+description: OptimaAi — AI-powered business intelligence platform for SMEs
+---
+
+# OptimaAi — Documentation
+
+**OptimaAi** is an AI-powered business intelligence platform designed for SMEs. It connects to Odoo ERP, processes sales, CRM, and invoice data, and delivers real-time revenue forecasting, churn prediction, growth projections, and LLM-generated business insights — all through a modern web dashboard.
+
+## What OptimaAi Does
+
+| Capability | Description |
+|---|---|
+| **Revenue Forecasting** | Predicts net revenue per order using XGBoost/GBM |
+| **Churn Prediction** | Scores customer churn risk (low / medium / high) |
+| **Growth Projection** | Forecasts 3-month forward revenue |
+| **KPI Dashboard** | Live model metrics with Redis caching |
+| **AI Recommendations** | Role-tailored business advice via LLM |
+| **Business Model Canvas** | Auto-generated 9-block BMC from ML KPIs |
+| **Knowledge Base** | RAG-powered Q&A over ingested business documents |
+| **Dataset Management** | Upload, preprocess, and store business data files |
+
+## Who Is It For?
+
+- **Sales Managers** — forecast revenue, spot at-risk customers, act on growth trends
+- **Finance Controllers** — review model accuracy, analyse forecast bias, track KPIs
+- **C-Suite Executives** — get high-level recommendations and a full Business Model Canvas
+
+## Tech Stack
+
+```
+Frontend      Next.js + Tailwind CSS
+Backend       FastAPI (Python)
+Database      PostgreSQL via SQLAlchemy
+Cache         Redis
+ML Models     XGBoost / GBM + Facebook Prophet
+LLM           OpenRouter (LangChain)
+Vector Store  ChromaDB (RAG Knowledge Base)
+ERP           Odoo 16/17
+```

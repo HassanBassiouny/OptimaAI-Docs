@@ -1,0 +1,124 @@
+---
+title: ML Training
+description: How to train the ML models and what gets created
+---
+
+# ML Training
+
+All models are trained via a single entry point: `python ml/train.py`.
+
+## Running Training
+
+```bash
+# From the project root
+python ml/train.py
+```
+
+This runs `OptimaAiMLTrainerV3` with the three datasets and writes outputs to `optimaai_artefacts/`.
+
+## What Gets Created
+
+After a successful training run, `optimaai_artefacts/` contains:
+
+```
+optimaai_artefacts/
+├── revenue_model_v20260511_100000.pkl     ← Trained XGBoost revenue model
+├── churn_model_v20260511_100000.pkl       ← Trained XGBoost churn model
+├── growth_model_v20260511_100000.pkl      ← Trained XGBoost growth model
+├── prophet_model_v20260511_100000.pkl     ← Trained Prophet model
+├── revenue_preprocessor_v*.pkl            ← Feature scaler/encoder
+├── churn_preprocessor_v*.pkl
+├── growth_preprocessor_v*.pkl
+└── evaluation_results_v20260511_100000.json  ← All metrics + forecasts
+```
+
+The version suffix is a timestamp (`YYYYMMDD_HHMMSS`). The `ml_bridge` always loads the file with the latest timestamp.
+
+## Training Pipeline Steps
+
+`OptimaAiMLTrainerV3` executes these steps for each model:
+
+```
+1. Load raw CSV from data/
+2. DynamicPreprocessingPipeline
+   - Type inference
+   - Missing value handling
+   - Outlier capping
+   - Feature encoding
+3. Train/test split (80/20, stratified for churn)
+4. Hyperparameter tuning (GridSearch or Optuna)
+5. Model training
+6. Evaluation
+   - Regression: MAPE, R², MAE, forecast bias
+   - Classification: ROC-AUC, F1, precision, recall
+7. Feature importance extraction
+8. 12-period / 12-month forward forecast generation
+9. Save model + preprocessor .pkl files
+10. Append results to evaluation_results_v*.json
+```
+
+## Configuring Data Paths
+
+Data paths are set in `ml/train.py`:
+
+```python
+DATA_PATHS = {
+    "revenue" : "data/amazon_revenue_forecasting.csv",
+    "churn"   : "data/amazon_churn_prediction.csv",
+    "growth"  : "data/amazon_growth_projection.csv",
+}
+
+ARTEFACT_DIR = "optimaai_artefacts"
+```
+
+Change these paths if your CSV files are named differently.
+
+## Retraining Schedule
+
+> **ℹ️ Note:** There is no automated scheduler — retraining is manual. Run `python ml/train.py` whenever new Odoo data is available. The API picks up the new artefacts on the next cache expiry (max 5 minutes).
+
+Recommended retraining cadence:
+
+| Business Scenario | Retraining Frequency |
+|---|---|
+| Stable, slow-growth SME | Monthly |
+| Active sales cycles | Weekly |
+| Seasonal business | Before each season |
+| After major data import | Immediately |
+
+## Evaluation Output
+
+The `evaluation_results_v*.json` file structure:
+
+```json
+{
+  "revenue_model": {
+    "MAPE_pct": 1.62,
+    "R2": 0.9998,
+    "MAE": 12.45,
+    "forecast_bias": -0.14,
+    "top_features": [
+      { "feature": "quantity_sold", "importance": 0.61 },
+      { "feature": "price", "importance": 0.22 }
+    ],
+    "12_period_forecast": [42100, 43800, ...]
+  },
+  "churn_model": {
+    "ROC_AUC": 1.00,
+    "F1_Score": 0.98,
+    "churn_rate_pct": 65.2,
+    "top_features": [
+      { "feature": "days_since_last_order", "importance": 0.45 },
+      { "feature": "churn_risk_score", "importance": 0.30 }
+    ]
+  },
+  "growth_model": {
+    "MAPE_pct": 3.1,
+    "R2": 0.991,
+    "12_month_forecast": [38000, 41000, ...]
+  },
+  "prophet_model": {
+    "MAPE_pct": 8.4
+  }
+}
+```

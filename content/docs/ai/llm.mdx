@@ -1,0 +1,129 @@
+---
+title: LLM & Prompts
+description: LangChain, OpenRouter and prompt engineering techniques
+---
+
+# LLM & Prompts
+
+OptimaAi uses **LangChain** with **OpenRouter** to power its two generative AI features: role-based recommendations and Business Model Canvas generation.
+
+## LLM Configuration
+
+```python
+from langchain_openai import ChatOpenAI
+
+llm = ChatOpenAI(
+    model="openrouter/free",
+    openai_api_key=os.getenv("OPENROUTER_API_KEY"),
+    openai_api_base="https://openrouter.ai/api/v1",
+    default_headers={
+        "HTTP-Referer": "https://optimaai.app",
+        "X-Title": "OptimaAi",
+    },
+    max_tokens=800,
+    temperature=0.2,   # Low temperature = consistent, grounded output
+)
+```
+
+**Why `temperature=0.2`?** Business recommendations need to be consistent and data-driven. A low temperature reduces hallucination and keeps the model anchored to the provided metrics.
+
+> **ℹ️ Note:** To use a more capable model (e.g. `openai/gpt-4o`, `anthropic/claude-3-5-sonnet`), simply change the `model` parameter. The LangChain abstraction means no other code changes are needed.
+
+## Prompt Engineering Techniques
+
+OptimaAi's `improved_prompts.py` applies seven systematic techniques:
+
+| # | Technique | Effect |
+|---|---|---|
+| 1 | **Role assignment** | "You are a senior business analyst…" — activates domain expertise |
+| 2 | **Context priming** | Explains what OptimaAi is before issuing the task |
+| 3 | **Output format** | Numbered sections with explicit word limits |
+| 4 | **Chain-of-thought** | Asks the model to reason before concluding |
+| 5 | **Constraints** | Forbidden generic phrases, tone rules (direct, no hedging) |
+| 6 | **Few-shot example** | One perfect example answer shown in-context |
+| 7 | **Grounding rule** | Every action item must cite at least one specific metric |
+
+---
+
+## Recommendation Prompt
+
+The recommendation prompt provides the LLM with live ML metrics and asks for a role-specific briefing.
+
+**Input variables:**
+
+| Variable | Example |
+|---|---|
+| `role` | `"Sales Manager"` |
+| `mape` | `"1.62"` |
+| `forecast_bias` | `"-0.14"` |
+| `r2` | `"0.9998"` |
+| `churn_rate` | `"65.2"` |
+| `churn_roc_auc` | `"1.00"` |
+| `growth_mape` | `"3.1"` |
+| `growth_r2` | `"0.991"` |
+| `revenue_forecast_avg` | `"$42,500/period"` |
+| `top_revenue_features` | `"quantity_sold, price, discount_percent"` |
+| `top_churn_features` | `"days_since_last_order, churn_risk_score"` |
+
+**Output structure:**
+
+```
+## Situation Summary
+(2–3 sentences, must cite MAPE and churn rate)
+
+## 3 Recommended Actions
+1. Action (with specific metric cited)
+2. Action (with specific metric cited)
+3. Action (with specific metric cited)
+
+## Risk to Watch
+(one paragraph on the biggest risk given the data)
+```
+
+**LangChain chain:**
+
+```python
+chain = RECOMMENDATION_PROMPT | llm | StrOutputParser()
+result = chain.invoke({ "role": "Sales Manager", "mape": "1.62", ... })
+```
+
+---
+
+## Business Model Canvas Prompt
+
+The BMC prompt generates all 9 canvas blocks in one call.
+
+**Input variables:** same ML metrics as the recommendation, plus:
+
+| Variable | Description |
+|---|---|
+| `platform_name` | e.g. `"OptimaAi"` |
+| `data_source` | e.g. `"Odoo ERP"` |
+| `target_users` | e.g. `"SME Sales Managers, Finance Controllers"` |
+| `revenue_forecast` | `"avg $42,500/period over 12 periods"` |
+
+**Output format enforced:**
+
+```markdown
+## 1. Customer Segments
+- [4–6 bullet points]
+
+## 2. Value Propositions
+- [4–6 bullet points]
+
+... (all 9 blocks)
+```
+
+The response is then parsed by `_parse_bmc_blocks()` into a structured dict for the frontend to render as cards.
+
+---
+
+## Adding a New LLM Feature
+
+To add a new LLM-powered feature:
+
+1. Define a `PromptTemplate` in `improved_prompts.py` with the required `input_variables`
+2. Build a chain: `chain = PROMPT | llm | StrOutputParser()`
+3. Create a service function in `app/services/` that assembles the variables and calls `chain.invoke()`
+4. Add a FastAPI route in `app/api.py` or a new router file
+5. Cache the result in Redis if it's expensive to compute

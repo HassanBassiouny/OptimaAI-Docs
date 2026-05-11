@@ -1,0 +1,4 @@
+{
+  "title": "OptimaAi Docs",
+  "pages": ["index", "architecture", "backend", "frontend", "odoo", "ai", "deployment"]
+}

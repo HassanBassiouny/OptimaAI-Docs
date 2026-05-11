@@ -1,0 +1,175 @@
+---
+title: Deployment Guide
+description: Docker, Nginx, Vercel and production checklist
+---
+
+# Deployment Guide
+
+## Prerequisites
+
+- Docker + Docker Compose (recommended)
+- Or: Python 3.10+, PostgreSQL 14+, Redis 6+
+
+---
+
+## Docker Compose (Recommended)
+
+Create a `docker-compose.yml` at the project root:
+
+```yaml
+version: "3.9"
+
+services:
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: optimaai
+      POSTGRES_PASSWORD: optimaai123
+      POSTGRES_DB: optimaai_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: ./optimaai-backend
+    env_file: ./optimaai-backend/.env
+    environment:
+      DATABASE_URL: postgresql://optimaai:optimaai123@postgres:5432/optimaai_db
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./optimaai-backend/optimaai_artefacts:/app/optimaai_artefacts
+      - ./optimaai-backend/knowledge_base:/app/knowledge_base
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  frontend:
+    build: ./optimaai-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+```
+
+**Start everything:**
+
+```bash
+docker-compose up -d
+```
+
+**Run training inside the backend container:**
+
+```bash
+docker-compose exec backend python ml/train.py
+```
+
+---
+
+## Manual Deployment
+
+```bash
+cd optimaai-backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Create .env, then:
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+```
+  
+  
+```bash
+cd optimaai-frontend
+npm install
+npm run build
+npm start         # Listens on port 3000
+```
+  
+
+---
+
+## Nginx Reverse Proxy
+
+Example Nginx configuration to serve both services under one domain:
+
+```nginx
+server {
+    listen 80;
+    server_name optimaai.your-domain.com;
+
+    # Frontend
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # Backend API
+    location /api/ {
+        proxy_pass http://localhost:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+---
+
+## Environment Variables Reference
+
+### Backend
+
+| Variable | Default | Required |
+|---|---|---|
+| `DATABASE_URL` | `postgresql://optimaai:optimaai123@localhost:5432/optimaai_db` | Yes |
+| `REDIS_URL` | `redis://localhost:6379/0` | No |
+| `OPENROUTER_API_KEY` | — | Yes (for LLM features) |
+| `CHROMA_DIR` | `knowledge_base/chroma` | No |
+
+### Frontend
+
+| Variable | Default | Required |
+|---|---|---|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Yes |
+
+---
+
+## Production Checklist
+
+- [ ] Set strong PostgreSQL password (not `optimaai123`)
+- [ ] Restrict CORS origins in `app/main.py`
+- [ ] Add HTTPS via Let's Encrypt or a load balancer
+- [ ] Mount `optimaai_artefacts/` as a persistent volume (models must survive container restarts)
+- [ ] Mount `knowledge_base/chroma/` as a persistent volume
+- [ ] Set `OPENROUTER_API_KEY` from a secrets manager (not committed to `.env`)
+- [ ] Run `python ml/train.py` at least once before starting the backend
+- [ ] Set up a cron job or Celery task for periodic retraining
+
+> **⚠️ Warning:** The `optimaai_artefacts/` directory must be preserved across deployments. If it is lost, all prediction endpoints will return 500 errors until training is re-run.
+
+---
+
+## Scaling
+
+| Component | How to scale |
+|---|---|
+| **Backend** | Run multiple Uvicorn workers: `--workers 4`. Models are loaded once per worker (lazy singleton). |
+| **Database** | Add a read replica for KPI query load |
+| **Cache** | Redis Cluster or Redis Sentinel for HA |
+| **LLM** | Switch to a paid OpenRouter model with higher rate limits; increase `TTL_RECOMMEND` to reduce call frequency |
+| **ML Training** | Schedule as a background job (Celery + Beat); train on a separate worker to avoid blocking the API |

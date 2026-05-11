@@ -1,0 +1,78 @@
+---
+title: Architecture
+description: System architecture and data flow overview
+---
+
+# Architecture
+
+OptimaAi follows a layered, service-oriented architecture. Each concern — data ingestion, ML inference, LLM generation, caching, persistence — is isolated into its own module.
+
+## High-Level Diagram
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    FRONTEND (Next.js)                    │
+│         Dashboard · Charts · KPIs · Recommendations      │
+└────────────────────────┬────────────────────────────────┘
+                         │ HTTP / REST
+┌────────────────────────▼────────────────────────────────┐
+│                  FASTAPI BACKEND                         │
+│                                                         │
+│   /api/v1/predict/*   /api/v1/kpis   /api/v1/recommend  │
+│   /api/v1/bmc         /api/v1/datasets   /api/v1/kb     │
+│                                                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐  │
+│  │  Inference   │  │  LLM Layer   │  │  Knowledge    │  │
+│  │  Service     │  │  (LangChain  │  │  Base (RAG)   │  │
+│  │  (XGBoost)   │  │  OpenRouter) │  │  (ChromaDB)   │  │
+│  └──────┬───────┘  └──────┬───────┘  └───────┬───────┘  │
+│  ┌──────▼─────────────────▼───────────────────▼───────┐  │
+│  │              Redis Cache Layer                      │  │
+│  └──────────────────────┬──────────────────────────────┘  │
+│  ┌──────────────────────▼──────────────────────────────┐  │
+│  │             PostgreSQL Database                      │  │
+│  └─────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────┐
+│                  ODOO ERP (Data Source)                  │
+│        Sales Orders · CRM · Invoices · Products          │
+└─────────────────────────────────────────────────────────┘
+```
+
+## Data Flow
+
+### Training Flow (offline)
+1. Raw CSV data is exported from Odoo (sales, churn, growth datasets)
+2. `train.py` runs `OptimaAiMLTrainerV3`, which preprocesses, trains, and evaluates all models
+3. Trained model files (`.pkl`) and evaluation metrics (`evaluation_results_v*.json`) are saved to `optimaai_artefacts/`
+
+### Inference Flow (real-time)
+1. API receives a prediction request
+2. `InferenceService` lazy-loads model artefacts via `OptimaAiInferenceV3`
+3. Features are preprocessed and passed through the appropriate model
+4. Response returned directly to the caller
+
+### KPI & LLM Flow (cached)
+1. `/api/v1/kpis` checks Redis first (5-min TTL)
+2. On cache miss, `ml_bridge` loads the latest `evaluation_results` JSON
+3. Metrics are persisted to `kpi_snapshots` in PostgreSQL and written to Redis
+4. `/api/v1/recommend` and `/api/v1/bmc` use these KPIs as LLM context
+
+### RAG Knowledge Base Flow
+1. Users upload documents via `/api/v1/datasets/upload`
+2. `DynamicPreprocessingPipeline` cleans and quality-scores the file
+3. Cleaned data is stored in PostgreSQL; text is embedded into ChromaDB
+4. `/api/v1/kb/query` retrieves relevant chunks and generates grounded LLM answers
+
+## Service Responsibilities
+
+| Service | File | Responsibility |
+|---|---|---|
+| `InferenceService` | `inference_service.py` | Load ML artefacts, expose predict functions |
+| `MLBridge` | `ml_bridge.py` | Find and load latest evaluation JSON |
+| `RecommendationService` | `recommendation_service.py` | Build LLM prompt, call OpenRouter |
+| `BMCService` | `bmc_service.py` | Generate 9-block Business Model Canvas |
+| `KnowledgeBase` | `knowledge_base.py` | ChromaDB ingestion and RAG query |
+| `Cache` | `cache.py` | Redis get/set with per-entity TTLs |
+| `Database` | `database.py` | SQLAlchemy models and session management |
