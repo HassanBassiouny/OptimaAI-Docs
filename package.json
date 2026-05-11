@@ -1,0 +1,24 @@
+{
+  "name": "optimaai-docs",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "postinstall": "fumadocs-mdx"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "@types/react": "^18",
+    "@types/node": "^20"
+  },
+  "dependencies": {
+    "fumadocs-core": "^14.4.0",
+    "fumadocs-mdx": "^11.1.0",
+    "fumadocs-ui": "^14.4.0",
+    "next": "^15.2.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}
