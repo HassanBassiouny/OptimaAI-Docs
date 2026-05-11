@@ -1,0 +1,53 @@
+---
+title: AI & ML Overview
+---
+
+# AI & ML Overview
+
+OptimaAi combines two AI paradigms:
+
+1. **Classical ML** — XGBoost/GBM models trained on structured Odoo data for fast, accurate numeric predictions
+2. **Large Language Models** — OpenRouter-hosted LLM (via LangChain) for human-readable recommendations, Business Model Canvas generation, and RAG-powered Q&A
+
+## Component Map
+
+```
+┌─────────────────────────────────────────────┐
+│              AI LAYER                        │
+│                                             │
+│  ┌─────────────┐   ┌─────────────────────┐  │
+│  │  ML MODELS  │   │   LLM PIPELINE      │  │
+│  │             │   │                     │  │
+│  │  Revenue    │   │  Recommendation     │  │
+│  │  Regressor  │   │  (role-based)       │  │
+│  │             │   │                     │  │
+│  │  Churn      │   │  Business Model     │  │
+│  │  Classifier │   │  Canvas (9-block)   │  │
+│  │             │   │                     │  │
+│  │  Growth     │   │  Knowledge Base     │  │
+│  │  Regressor  │   │  (RAG / ChromaDB)   │  │
+│  │             │   │                     │  │
+│  │  Prophet    │   │  LangChain +        │  │
+│  │  (time-ser.)│   │  OpenRouter Free    │  │
+│  └──────┬──────┘   └──────────┬──────────┘  │
+│         │                     │             │
+│  ┌──────▼─────────────────────▼──────────┐  │
+│  │   ML Bridge — loads artefacts,        │  │
+│  │   feeds metrics as LLM context        │  │
+│  └───────────────────────────────────────┘  │
+└─────────────────────────────────────────────┘
+```
+
+## Key Design Decisions
+
+**Why XGBoost over deep learning?**
+Tabular ERP data with hundreds to thousands of rows responds better to gradient boosting than neural networks. XGBoost trains fast, requires no GPU, and produces interpretable feature importances that directly inform the LLM prompts.
+
+**Why OpenRouter free tier?**
+OptimaAi is built for SMEs with limited IT budgets. Using OpenRouter's free model tier keeps LLM costs near zero during validation. The LangChain abstraction makes it trivial to swap in a paid model (GPT-4o, Claude 3.5, etc.) when scale demands it.
+
+**Why ChromaDB for RAG?**
+ChromaDB is embeddable (no separate server required for local use), persists to disk, and works seamlessly with SentenceTransformers. For larger deployments, the `knowledge_base.py` abstraction can be backed by Pinecone or Weaviate with minimal changes.
+
+**Why are ML metrics passed to the LLM?**
+Rather than fine-tuning the LLM on business data, OptimaAi grounds every LLM call in fresh, live ML metrics. This keeps the LLM's advice data-driven and avoids hallucination — every recommendation must cite at least one specific metric.

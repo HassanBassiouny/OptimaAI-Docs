@@ -1,0 +1,118 @@
+---
+title: Models
+---
+
+# Models
+
+OptimaAi trains four models per run. Each is tailored to a specific business question.
+
+---
+
+## Revenue Regressor
+
+**Algorithm:** XGBoost / Gradient Boosting Regressor
+**Task:** Predict net revenue for a single order line
+
+**Target variable:** `net_revenue` (USD)
+
+**Key features:**
+
+| Feature | Importance | Description |
+|---|---|---|
+| `quantity_sold` | ~0.61 | Units sold — dominant driver |
+| `price` | ~0.22 | Unit price before discount |
+| `discount_percent` | ~0.08 | Discount applied |
+| `seasonal_index` | ~0.05 | Monthly seasonality factor |
+| `gross_margin_pct` | ~0.03 | Margin as a ratio |
+
+**Evaluation metrics:**
+
+| Metric | Benchmark | What it means |
+|---|---|---|
+| MAPE | < 10% = excellent | Mean Absolute Percentage Error |
+| R² | > 0.95 = strong | Variance explained |
+| MAE | lower = better | Mean Absolute Error in USD |
+| Forecast Bias | ~0 = ideal | Signed average error (+ = overforecast) |
+
+**12-period forecast:** The model generates a 12-step revenue projection used in the KPI dashboard chart.
+
+---
+
+## Churn Classifier
+
+**Algorithm:** XGBoost Classifier
+**Task:** Predict whether a customer will churn (binary classification)
+
+**Target variable:** `churned` (0 = active, 1 = churned)
+
+**Key features:**
+
+| Feature | Importance | Description |
+|---|---|---|
+| `days_since_last_order` | ~0.45 | Inactivity signal |
+| `churn_risk_score` | ~0.30 | Pre-computed CRM score |
+| `total_orders` | ~0.12 | Order history volume |
+| `avg_days_between_orders` | ~0.08 | Ordering cadence |
+| `avg_order_value` | ~0.05 | Customer value |
+
+**Evaluation metrics:**
+
+| Metric | Benchmark | What it means |
+|---|---|---|
+| ROC-AUC | > 0.8 = strong | Discrimination ability |
+| F1 Score | > 0.75 = good | Balance of precision and recall |
+| Churn Rate | Dataset statistic | Baseline churn % in training data |
+
+**Risk classification at inference:**
+
+```python
+prob = churn_model.predict_proba(features)[0][1]
+risk = "high" if prob >= 0.7 else "medium" if prob >= 0.4 else "low"
+```
+
+---
+
+## Growth Regressor
+
+**Algorithm:** XGBoost / GBM Regressor
+**Task:** Predict 3-month forward revenue
+
+**Target variable:** `revenue_growth_3m` (USD)
+
+This model uses period-level aggregates (monthly or quarterly) rather than individual orders. It captures macroeconomic trends, new customer acquisition, and order volume changes over time.
+
+**Evaluation metrics:** MAPE, R²
+
+---
+
+## Prophet (Time-Series)
+
+**Algorithm:** Facebook Prophet
+**Task:** Univariate time-series revenue forecasting
+
+Prophet is trained on the historical `total_revenue` time series and produces a probabilistic forecast with trend, weekly, and yearly seasonality components.
+
+It serves as a **cross-validation baseline** — if the XGBoost growth model and Prophet agree on the forecast direction, confidence is higher.
+
+**Evaluation metric:** MAPE on the holdout period
+
+**Output:** 12-month forecast used alongside the growth model in dashboard charts.
+
+---
+
+## Model Loading (Lazy Singleton)
+
+Models are loaded once at first request and kept in memory:
+
+```python
+# inference_service.py
+_inference = None
+
+def get_inference():
+    global _inference
+    if _inference is None:
+        _inference = OptimaAiInferenceV3(artefact_dir=ARTEFACT_DIR)
+    return _inference
+```
+
+The artefact directory is scanned for the latest timestamped `.pkl` files on each initialisation.
